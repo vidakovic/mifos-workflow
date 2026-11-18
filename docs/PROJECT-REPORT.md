@@ -65,8 +65,7 @@ Every top-level module under `modules/` represents one problem domain:
 
 ```
 modules/
-├── infrastructure/     workflow engine integration — domain-agnostic
-└── fineract/           Fineract integration — engine-agnostic
+├── process/     workflow engine integration — domain-agnostic
 ```
 
 Neither knows about the other. A future integration with an unrelated external system would become a third top-level module.
@@ -86,19 +85,19 @@ Folder depth is the visibility signal: the deeper a class sits, the more private
 
 ### 3.3 The SPI
 
-`modules/infrastructure/core` defines the contract. Nine interfaces, each a single-method functional interface extending `MifosUsecase<Req, Res>` from the Mifos commons library:
+`../modules/process` defines the contract. Nine interfaces, each a single-method functional interface extending `MifosUsecase<Req, Res>` from the Mifos commons library:
 
 | Interface | Operation |
 |---|---|
-| `MifosFlowDeployUsecase` | install a workflow definition |
-| `MifosFlowDeleteUsecase` | remove a deployed definition |
-| `MifosFlowStartUsecase` | start a process instance |
-| `MifosFlowCompleteUsecase` | complete a human task |
-| `MifosFlowTerminateUsecase` | terminate a running instance |
-| `MifosFlowTaskPendingUsecase` | list a user's pending tasks |
-| `MifosFlowHistoryUsecase` | query completed instances |
-| `MifosFlowSignalUsecase` | send an event into a waiting process |
-| `MifosFlowReplayUsecase` | re-run a past process |
+| `MifosProcessDeployUsecase` | install a workflow definition |
+| `MifosProcessDeleteUsecase` | remove a deployed definition |
+| `MifosProcessStartUsecase` | start a process instance |
+| `MifosProcessCompleteUsecase` | complete a human task |
+| `MifosProcessTerminateUsecase` | terminate a running instance |
+| `MifosProcessTaskPendingUsecase` | list a user's pending tasks |
+| `MifosProcessHistoryUsecase` | query completed instances |
+| `MifosProcessSignalUsecase` | send an event into a waiting process |
+| `MifosProcessReplayUsecase` | re-run a past process |
 
 Each has one paired request and response class. Requests and responses are never shared between operations — one request class corresponds to exactly one usecase, which is what makes the callback routing described in 3.5 possible.
 
@@ -107,10 +106,10 @@ Each has one paired request and response class. Requests and responses are never
 The distinction between `usecase/` and `support/` is the direction of the call:
 
 ```
-infrastructure/usecase/<engine>     the application calls the engine
+process/usecase/<engine>     the application calls the engine
                                     "start this process", "terminate that one"
 
-infrastructure/support/<engine>     the engine calls the application
+process/support/<engine>     the engine calls the application
                                     "I reached a service task, run the business logic"
 ```
 
@@ -152,13 +151,13 @@ Every engine implementation carries:
 @ConditionalOnBooleanProperty(FLOWABLE_WORKFLOW_PROPERTIES_ENABLED)
 ```
 
-which resolves to `mifos.workflow.infrastructure.flowable.enabled`. When false, Spring does not create those beans. Controllers depend only on the interfaces, so switching engines is a configuration change with no code change and no recompilation.
+which resolves to `mifos.workflow.process.flowable.enabled`. When false, Spring does not create those beans. Controllers depend only on the interfaces, so switching engines is a configuration change with no code change and no recompilation.
 
 The design is deliberately one engine per application instance. The mentor's reasoning, from a project meeting: allowing several engines in one instance eventually requires workflows in different engines to signal each other, which is difficult to reason about and to operate.
 
 ### 3.7 Transport
 
-`modules/infrastructure/transport/rest` exposes nine endpoints, one per operation:
+`../modules/process` exposes nine endpoints, one per operation:
 
 ```
 POST /workflows/deploy          POST /workflows/history
@@ -192,7 +191,7 @@ All nine Flowable usecases are implemented. All were previously present as stubs
 | Signal | no body — request lacked the required fields | delivers a named signal, globally or to one instance |
 | Replay | no body — no native engine operation exists | rebuilds a finished process from history and starts it again |
 
-Example — `FlowableFlowDeployUsecase` before:
+Example — `FlowableDeployUsecase` before:
 
 ```java
 // var deployment =
@@ -225,7 +224,7 @@ return MifosFlowDeployResponse.builder()
 
 These two were blocked for most of the project because the request models did not carry enough information to call the engine at all. Both were unblocked after the design question was settled with the mentor.
 
-**Signal.** `MifosFlowSignalRequest` carried only `UUID id`. Flowable's `signalEventReceived` needs a signal *name*, and delivering to one specific instance additionally needs that instance's execution id. Two fields were added:
+**Signal.** `Request` carried only `UUID id`. Flowable's `signalEventReceived` needs a signal *name*, and delivering to one specific instance additionally needs that instance's execution id. Two fields were added:
 
 ```java
 private String signalName;
@@ -282,9 +281,9 @@ This removes a whole family of empty classes that would have existed only to be 
 
 ### 4.4 Contract changes
 
-Three changes were made to shared models in `infrastructure/core`, on top of the two Signal/Replay additions above. Each was driven by a runtime failure or a structural mismatch rather than preference, and each was raised with the mentor.
+Three changes were made to shared models in `process/core`, on top of the two Signal/Replay additions above. Each was driven by a runtime failure or a structural mismatch rather than preference, and each was raised with the mentor.
 
-**`MifosFlowDeployRequest.processDefinition`: `InputStream` → `String`**
+**`Request.processDefinition`: `InputStream` → `String`**
 
 Jackson cannot deserialise an `InputStream` from a JSON body. The endpoint returned:
 
@@ -295,31 +294,31 @@ HttpMessageConversionException: Type definition error: [simple type, class java.
 
 The field now carries the definition as text and is converted to a stream inside the usecase. This affects all seven engines equally — the same limitation would have applied to each.
 
-**`MifosFlowTaskPendingResponse`: single task → `List<MifosFlowTask>`**
+**`Response`: single task → `List<MifosFlowTask>`**
 
-The response held nine fields describing one task, while the query is `taskService.createTaskQuery().taskAssignee(...).list()`, which returns many. The injected `FlowableTaskPendingMapper` could not be used because there was no list to map into. A new `MifosFlowTask` model holds the per-task fields; the response holds a list of them; the mapper gained a list method.
+The response held nine fields describing one task, while the query is `taskService.createTaskQuery().taskAssignee(...).list()`, which returns many. The injected `FlowableTaskPendingMapper` could not be used because there was no list to map into. A new `Task` model holds the per-task fields; the response holds a list of them; the mapper gained a list method.
 
-**`MifosFlowHistoryResponse`: `UUID id` → `List<MifosFlowHistoryEntry>`**
+**`Response`: `UUID id` → `List<MifosFlowHistoryEntry>`**
 
 The same mismatch. A new `MifosFlowHistoryEntry` model was added, along with a new `FlowableHistoryMapper`. The usecase now also honours `request.getId()`, filtering to a single instance when one is supplied and returning all completed instances when it is not — previously the request was ignored entirely.
 
 ### 4.5 Error handling
 
-`MifosFlowException.MifosFlowErrorCode` contained two entries. Seven were added, each corresponding to a failure mode of the implemented operations:
+`MifosProcessException.MifosFlowErrorCode` contained two entries. Seven were added, each corresponding to a failure mode of the implemented operations:
 
 ```
-MIFOS_FLOW_ERROR_DEPLOYMENT_FAILED
-MIFOS_FLOW_ERROR_DEPLOYMENT_NOT_FOUND
-MIFOS_FLOW_ERROR_PROCESS_DEFINITION_NOT_FOUND
-MIFOS_FLOW_ERROR_PROCESS_NOT_FOUND
-MIFOS_FLOW_ERROR_PROCESS_START_FAILED
-MIFOS_FLOW_ERROR_TASK_NOT_FOUND
-MIFOS_FLOW_ERROR_ENGINE_UNAVAILABLE
+MIFOS_WORKFLOW_PROCESS_ERROR_DEPLOYMENT_FAILED
+MIFOS_WORKFLOW_PROCESS_ERROR_DEPLOYMENT_NOT_FOUND
+MIFOS_WORKFLOW_PROCESS_ERROR_PROCESS_DEFINITION_NOT_FOUND
+MIFOS_WORKFLOW_PROCESS_ERROR_PROCESS_NOT_FOUND
+MIFOS_WORKFLOW_PROCESS_ERROR_PROCESS_START_FAILED
+MIFOS_WORKFLOW_PROCESS_ERROR_TASK_NOT_FOUND
+MIFOS_WORKFLOW_PROCESS_ERROR_ENGINE_UNAVAILABLE
 ```
 
 Numbering follows the existing scheme, derived from `ERROR_CODE_START` and `ERROR_CODE_INCREMENT` rather than hard-coded.
 
-The six `messages*.properties` resource bundles in `infrastructure/core` were empty. All are now populated with one entry per error code, in English, German, Spanish, French and Indonesian. The non-English translations are machine quality and should be reviewed by native speakers.
+The six `messages*.properties` resource bundles in `process/core` were empty. All are now populated with one entry per error code, in English, German, Spanish, French and Indonesian. The non-English translations are machine quality and should be reviewed by native speakers.
 
 The codes are defined but not yet thrown from the usecases; wiring them in awaits confirmation of the intended pattern, as the commons library provides its own `MifosErrorHandlingControllerAdvice`.
 
@@ -365,7 +364,7 @@ The fallback is deterministic — the same engine id always yields the same UUID
 
 ### 5.3 Two missing build dependencies
 
-`modules/infrastructure/usecase/operaton/mapping/build.gradle` and the Eximee equivalent were both empty files. The CIBSeven one had been set up by the mentor; the other two had not, so the mapper modules could not see the engine's model types at all and MapStruct had nothing to generate against. Both now declare the engine's Spring Boot starter:
+`../modules/process` and the Eximee equivalent were both empty files. The CIBSeven one had been set up by the mentor; the other two had not, so the mapper modules could not see the engine's model types at all and MapStruct had nothing to generate against. Both now declare the engine's Spring Boot starter:
 
 ```groovy
 dependencies {
@@ -468,17 +467,17 @@ This was the cause of a symptom that took considerable time to isolate: every UR
 
 ### 7.2 Application does not depend on the workflow modules
 
-`modules/fineract/application/backend/implementation` did not have `infrastructure-starter` on its runtime classpath. Verified with:
+`modules/fineract/application/backend/implementation` did not have `process-starter` on its runtime classpath. Verified with:
 
 ```
 gradlew :mifos-workflow-fineract-application-backend-implementation:dependencies --configuration runtimeClasspath
 ```
 
-which returned no `infrastructure` entries at all. None of the controllers, usecases, support classes or the engine were present in the running application.
+which returned no `process` entries at all. None of the controllers, usecases, support classes or the engine were present in the running application.
 
 ### 7.3 Engine auto-configurations activate unconditionally
 
-With the infrastructure starter present, all seven engines land on the classpath. Four of them ship Spring auto-configurations that activate without checking whether that engine is wanted, and fail at startup looking for a server that is not running:
+With the process starter present, all seven engines land on the classpath. Four of them ship Spring auto-configurations that activate without checking whether that engine is wanted, and fail at startup looking for a server that is not running:
 
 ```
 io.orkes.conductor.client.spring.OrkesConductorClientAutoConfiguration
@@ -517,12 +516,12 @@ Verified end to end through Postman against a locally running instance, using Fl
 
 ```
 gradlew :mifos-workflow-fineract-application-backend-implementation:bootRun \
-        --args="--mifos.workflow.infrastructure.flowable.enabled=true"
+        --args="--mifos.workflow.process.flowable.enabled=true"
 ```
 
 Local workarounds required, none of which are committed:
 
-- `infrastructure-starter` added as a dependency of the application module (7.2)
+- `process-starter` added as a dependency of the application module (7.2)
 - the four engine auto-configurations excluded in `application.yml` (7.3)
 - `@ComponentScan` widened on `Main` so the transport and Flowable usecase packages are picked up
 - `filterChain.doFilter(...)` added to `MifosContextRequestFilter` in a local build of `mifos-commons-boot` (7.1)
@@ -653,7 +652,7 @@ Not fully demonstrated:
 
 1. **`MifosContextRequestFilter` (7.1) needs fixing upstream.** Until it is, no Spring MVC application using `mifos-commons-boot-transport-rest-imperative` can serve a request.
 2. **The SDK starter (7.4) needs a dependencies block**, or consuming modules must depend on the implementation artifact directly. The OAS artifacts also need publishing to JFrog if consumers are not to be required to build them locally.
-3. **The aggregating infrastructure starter (7.3) cannot currently include all engines**, because four third-party auto-configurations activate unconditionally. Either the starter should be split per engine, or the exclusions should be applied centrally.
+3. **The aggregating process starter (7.3) cannot currently include all engines**, because four third-party auto-configurations activate unconditionally. Either the starter should be split per engine, or the exclusions should be applied centrally.
 4. **The remaining three engine adapters** — Camunda 8, Conductor, Cadence — are open, well-defined pieces of work. The contract exists and four worked examples now exist alongside it.
 5. **BPMN definitions should be made overridable** so an institution can customise a process by supplying its own definition rather than modifying the project, which was the mentor's stated intent for the design.
 

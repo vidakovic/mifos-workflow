@@ -1,0 +1,46 @@
+[#reference-engines]
+= Engine differences
+
+The usecases and the adapters work the same on all engines, with these differences.
+<<explanation-engine-models>> gives the reasons.
+
+[cols="2,3,3"]
+|===
+| Item | CIB seven, Operaton, Eximee, Flowable | Camunda 8
+
+| Location of the engine
+| In the application. The engine uses the database of the application.
+| In a different process. The application connects to the cluster with a client.
+
+| IDs in responses
+| The ID of the engine. CIB seven, Operaton and Eximee change an ID that is not a UUID into a name-based UUID. This change cannot be reversed. Flowable must use UUID IDs.
+| The key of the engine in a UUID (`00000000-0000-0000-xxxx-xxxxxxxxxxxx`). The change can be reversed.
+
+| IDs in requests
+| The ID of the engine.
+| The UUID from a response or the key of the engine as a number.
+
+| Deploy and delete
+| Delete removes the deployment and its running process instances.
+| Deploy returns the key of the process definition. Delete removes this process definition and cancels its running process instances.
+
+| Signal to one process instance
+| Yes. The process instance must wait for the signal.
+| No. The usecase throws an `UnsupportedOperationException`.
+
+| Reason for terminate
+| The engine stores the reason.
+| The engine does not store the reason. The usecase only writes it to the log.
+
+| User tasks
+| All user tasks.
+| Camunda user tasks only (`<zeebe:userTask/>`).
+
+| Pending tasks, history, replay
+| The data is available immediately.
+| The data comes from the search API. It is available after a short delay.
+
+| Error in a service task
+| The engine cancels the transaction. The request that started the step fails.
+| Camunda makes an incident. The process instance stays active.
+|===

@@ -1,0 +1,98 @@
+[#reference-configuration]
+= Configuration properties
+
+Spring Boot reads these properties from `application.yml`, `application.properties`, environment variables and the command line.
+<<appendix-config>> gives a full example.
+
+IMPORTANT: The usecase beans and the adapter beans are only registered if their properties are set.
+The default values in the properties classes do not register them.
+Thus the column "Default" shows "not set: off" for these properties.
+
+[#reference-configuration-base]
+== Base (`mifos.workflow.process`)
+
+[cols="3,1,2,4"]
+|===
+| Property | Type | Default | Description
+
+| `mifos.workflow.process.enabled`
+| Boolean
+| `true`
+| Reserved. The current version does not use this property.
+
+| `mifos.workflow.process.engine`
+| Enum
+| not set: off
+| The engine of the application: `CIBSEVEN`, `EXIMEE`, `OPERATON`, `FLOWABLE`, `CAMUNDA` or `CONDUCTOR`. Registers the nine usecase beans of this engine. Lowercase values are also correct. `MifosProcessProperties` has the default value `CIBSEVEN`, but this value does not register the usecase beans.
+
+| `mifos.workflow.process.transport.rest.enabled`
+| Boolean
+| `true`
+| Reserved. The current version does not use this property. The REST API is always available if its starter is present.
+|===
+
+[#reference-configuration-adapters]
+== Adapters (`mifos.workflow.process.support.<engine>`)
+
+`<engine>` is one of `cibseven`, `operaton`, `eximee`, `flowable` or `camunda`.
+
+[cols="3,1,2,4"]
+|===
+| Property | Type | Default | Description
+
+| `mifos.workflow.process.support.<engine>.enabled`
+| Boolean
+| not set: off
+| Registers the adapter of the engine. Set it to `true` for one engine only.
+
+| `mifos.workflow.process.support.<engine>.input-variable`
+| String
+| `input`
+| The process variable that contains the input of the usecase or the flow.
+
+| `mifos.workflow.process.support.<engine>.output-variable`
+| String
+| `output`
+| The process variable that receives the output of the usecase or the flow.
+
+| `mifos.workflow.process.support.<engine>.fail-on-null-input`
+| Boolean
+| `true`
+| If `true`, the step fails when the input variable is not set. If `false`, the adapter sends an empty input.
+
+| `mifos.workflow.process.support.<engine>.serialize-result`
+| Boolean
+| `true`
+| If `true`, the adapter stores the output as JSON text. If `false`, it stores the output object.
+|===
+
+[#reference-configuration-engines]
+== Engine properties
+
+The engines have their own properties.
+These libraries do not change them.
+
+[cols="1,2,3"]
+|===
+| Engine | Prefix | Note
+
+| CIB seven
+| `camunda.bpm`
+| The engine also needs a `DataSource` (`spring.datasource`).
+
+| Operaton
+| `operaton.bpm`
+| The engine also needs a `DataSource` (`spring.datasource`).
+
+| Eximee
+| Refer to the Eximee documentation.
+| The engine also needs a `DataSource` (`spring.datasource`).
+
+| Flowable
+| `flowable`
+| The engine also needs a `DataSource` (`spring.datasource`).
+
+| Camunda 8
+| `camunda.client`
+| The client connects to a Camunda 8 cluster. It does not need a `DataSource`.
+|===
